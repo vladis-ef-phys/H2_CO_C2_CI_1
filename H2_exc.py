@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,7 +6,9 @@ import os
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
 from scipy import integrate
-
+import sys
+sys.path.append('C:/science/python')
+from spectro.a_unc import a
 
 def column(matrix, i):
     if i == 0 or (isinstance(i, str) and i[0] == 'v'):
@@ -229,7 +232,9 @@ class model():
         for s in species:
             cols[s] = np.log10(np.trapz(self.sp[s][self.mask], x=self.x[self.mask]) * sides)
 
-        return cols
+        self.cols = cols
+
+        return self.cols
 
     def set_mask(self, logN={'H': None}):
         """
@@ -247,10 +252,22 @@ class model():
             self.mask = cols > -1
         #return np.searchsorted(cols, value)
 
+    def lnL(self, species={}, syst=0):
+        lnL = 0
+        for k, v in species.items():
+            v1 = v
+            v1 *= a(0, 0.1, 0.1, 'l')
+            print(self.cols[k], v1.log(), v1.lnL(self.cols[k]))
+            if v.type == 'm':
+                lnL += v1.lnL(self.cols[k])
+
+        self.lnL = lnL
+        return self.lnL
+
 class H2_exc():
     def __init__(self, folder=''):
         self.folder = folder
-        self.model = {}
+        self.models = {}
         self.species = ['H', 'H2', 'C', 'C+', 'CO', 'H2j0', 'H2j1', 'H2j2', 'H2j3', 'H2j4', 'H2j5', 'H2j6', 'H2j7']
         self.readH2database()
 
@@ -267,7 +284,7 @@ class H2_exc():
         """
         if filename is not None:
             m = model(folder=self.folder, filename=filename, species=self.species)
-            self.model[m.name] = m
+            self.models[m.name] = m
             self.current = m.name
 
     def readfolder(self):
@@ -277,64 +294,170 @@ class H2_exc():
         for f in os.listdir(self.folder):
             self.readmodel(f)
 
-    def compare(self, objects=[], model='current'):
-        if model == 'current':
-            m = self.model[self.current]
+    def comp(self, object):
+        """
+        Return componet object from self.H2
+        :param:
+            -  object         :  object name.
+                                    Examples: '0643' - will search for the 0643 im quasar names. Return first component.
+                                              '0643_1' - will search for the 0643 im quasar names. Return second component
+        :return: q
+            -  q              :  qso.comp object (see file H2_summary.py how to retrieve data (e.g. column densities) from it
+        """
+        qso = self.H2.get(object.split('_')[0])
+        if len(object.split('_')) > 1:
+            q = qso.comp[int(object.split('_')[1])]
         else:
-            m = self.model[model]
+            q = qso.comp[0]
 
-        obj = {}
-        for o in objects:
-            for qso in self.H2:
-                if o in qso.name:
-                    for q in qso.comp:
-                        species = [s for s in q.e.keys() if 'H2j' in s]
-                        sp = m.calc_cols(species, logN={'H2': q.e['H2'].col.val})
-                        print(sp)
-                        for s in sp.keys():
-                            sp[s] = (sp[s], q.e[s].col)
-            obj[o] = sp
+        return q
 
-        return obj
+    def plot_objects(self, objects=[], species=[], ax=None, plotstyle='scatter', legend=False):
+        """
+        Plot object from the data
 
-    def plot_H2exc(self, objects=[], ax=None):
+        :param:
+            -  objects              :  names of the object to plot
+            -  species              :  names of the species to plot
+            -  ax                   :  axes object, where to plot. If None, then it will be created
+            -  plotstyle            :  style of plotting. Can be 'scatter' or 'lines'
+            -  legend               :  show legend
+
+        :return: ax
+            -  ax                   :  axes object
+        """
         if ax is None:
             fig, ax = plt.subplots(figsize=(12, 8))
 
-        objects = self.compare(objects=objects)
-
-        for sp in objects.values():
-            j = np.sort([int(s[3:]) for s in sp.keys()])
+        if not isinstance(objects, list):
+            objects = [objects]
+        for o in objects:
+            q = self.comp(o)
+            if species is None or len(species) == 0:
+                species = [s for s in q.e.keys() if 'H2j' in s]
+            j = np.sort([int(s[3:]) for s in species])
             x = [H2energy[0, i] for i in j]
-            y = [sp['H2j'+str(i)][1] / stat[i] for i in j]
-            mod = [sp['H2j'+str(i)][0] - np.log10(stat[i]) for i in j]
-            typ = [sp['H2j'+str(i)][1].type for i in j]
+            y = [q.e['H2j' + str(i)].col / stat[i] for i in j]
+            typ = [q.e['H2j' + str(i)].col.type for i in j]
             if len(y) > 0:
-                color = plt.cm.tab10(list(objects.values()).index(sp)/10)
+                color = plt.cm.tab10(objects.index(o) / 10)
+                if plotstyle == 'line':
+                    ax.plot(x, column(y, 'v'), marker='o', ls='-', lw=2, color=color, label=o)
+                for k in range(len(y)):
+                    if typ[k] == 'm':
+                        ax.errorbar([x[k]], [column(y, 0)[k]], yerr=[[column(y, 1)[k]], [column(y, 2)[k]]],
+                                    fmt='o', lw=0, elinewidth=1, color=color, label=o)
+                    if typ[k] == 'u':
+                        ax.errorbar([x[k]], [column(y, 0)[k]], yerr=[[0.4], [0.4]],
+                                    fmt='o', uplims=0.2, lw=1, elinewidth=1, color=color)
 
-                ax.plot(x, mod, marker='o', ls='--', lw=2, color='k', label='model', zorder=0)
+        if legend:
+            handles, labs = ax.get_legend_handles_labels()
+            labels = np.unique(labs)
+            handles = [handles[np.where(np.asarray(labs) == l)[0][0]] for l in labels]
+            ax.legend(handles, labels, loc='best')
 
-                if 0:
-                    ax.plot(x, column(y, 'v'), marker='o', ls='-', lw=2, color=color, label='obs')
-                else:
-                    for k in range(len(y)):
-                        if typ[k] == 'm':
-                            ax.errorbar([x[k]], [column(y, 0)[k]], yerr=[[column(y, 1)[k]], [column(y, 2)[k]]],
-                                        fmt='o', lw=0, elinewidth=1, color=color)
-                        if typ[k] == 'u':
-                            ax.errorbar([x[k]], [column(y, 0)[k]], yerr=[[0.4], [0.4]],
-                                        fmt='o', uplims=0.2, lw=1, elinewidth=1, color=color)
+        return ax
+
+    def listofmodels(self, models=[]):
+        """
+        Return list of models
+
+        :param:
+            -  models         :  names of the models, can be list or string for individual model
+
+        :return: models
+            -  models         :  list of models
+
+        """
+        if isinstance(models, str):
+            if models == 'current':
+                models = [self.models[self.current]]
+            elif models == 'all':
+                models = list(self.models.values())
+            else:
+                models = [self.models[models]]
+        elif isinstance(models, list):
+            if len(models) == 0:
+                models = list(self.models.values())
+            else:
+                models = [self.models[m] for m in models]
+
+        return models
+
+    def compare(self, object='', models='current', syst='syst'):
+        """
+        Calculate the column densities of H2 rotational levels for the list of models given the total H2 column density.
+        and also log of likelihood
+
+        :param:
+            -  object            :  object name
+            -  models            :  names of the models, can be list or string
+            -  syst              :  add systematic uncertainty to the calculation of the likelihood
+
+        :return: None
+            column densities are stored in the dictionary <cols> attribute for each model
+            log of likelihood value is stored in <lnL> attribute
+        """
+
+        q = self.comp(object)
+
+        for model in self.listofmodels(models):
+            species = OrderedDict([(s, q.e[s].col) for s in q.e.keys() if 'H2j' in s])
+            print(species)
+            model.calc_cols(species.keys(), logN={'H2': q.e['H2'].col.val})
+            model.lnL(species, syst=syst)
+
+    def plot_models(self, ax=None, models='current'):
+        """
+        Plot excitation for specified models
+
+        :param:
+            -  ax                :  axes object, where to plot. If None, it will be created
+            -  models            :  names of the models to plot
+
+        :return: ax
+            -  ax                :  axes object
+        """
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(12, 8))
+
+        for ind, m in enumerate(self.listofmodels(models)):
+            j = np.sort([int(s[3:]) for s in m.cols.keys()])
+            x = [H2energy[0, i] for i in j]
+            mod = [m.cols['H2j'+str(i)] - np.log10(stat[i]) for i in j]
+
+            if len(mod) > 0:
+                color = plt.cm.tab10(ind/10)
+                ax.plot(x, mod, marker='', ls='--', lw=1, color=color, label=m.name, zorder=0)
+
+        return ax
+
+    def best(self, object='', models='all', syst=0.0):
+
+        self.compare(object=object, models=models, syst=syst)
+
+        models = self.listofmodels(models)
+
+        return models[np.argmax([m.lnL for m in models])].name
 
 if __name__ == '__main__':
     import sys
 
     app = QtGui.QApplication([])
 
+    fig, ax = plt.subplots()
     H2 = H2_exc(folder='data/')
     #H2.readmodel(filename='test_s_20.hdf5')
     H2.readfolder()
     #H2.compare(['J0643'])
-    H2.plot_H2exc(objects=['J0643'])
+    H2.plot_objects(objects='0643', ax=ax)
+    name = H2.best(object='0643', syst=0.1)
+    print(H2.models[name].uv)
+    if 0:
+        H2.plot_models(ax=ax, models='all')
+    else:
+        H2.plot_models(ax=ax, models=name)
 
     plt.tight_layout()
     plt.show()
