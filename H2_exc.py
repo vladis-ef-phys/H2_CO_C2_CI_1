@@ -180,7 +180,7 @@ class model():
             ax.legend(handles=lines, loc='best')
 
 
-    def plot_profiles(self, species=None, ax=None, legend=True):
+    def plot_profiles(self, species=None, ax=None, legend=True, ls='-', lw=1):
         """
         Plot the profiles of the species
 
@@ -188,6 +188,8 @@ class model():
             -  species       :  ist of the species to plot
             -  ax            :  axis object to plot in, if None, then figure is created
             -  legend        :  show legend
+            -  ls            :  linestyles
+            -  lw            :  linewidth
 
         :return: ax
             -  ax            :  axis object
@@ -199,7 +201,7 @@ class model():
             fig, ax = plt.subplots()
 
         for s in species:
-            ax.plot(np.log10(self.x[1:]), np.log10(self.sp[s][1:]), '-', label=s)
+            ax.plot(np.log10(self.x[1:]), np.log10(self.sp[s][1:]), '-', label=s, lw=lw)
 
         if legend:
             ax.legend()
