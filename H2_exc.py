@@ -7,7 +7,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
 from scipy import integrate
 import sys
-sys.path.append('C:/science/python')
+sys.path.append('/home/toksovogo/science/codes/python')
 from spectro.a_unc import a
 
 def column(matrix, i):
@@ -183,7 +183,7 @@ class model():
             ax.legend(handles=lines, loc='best')
 
 
-    def plot_profiles(self, species=None, ax=None, legend=True, ls='-', lw=1):
+    def plot_profiles(self, species=['H2j0'], logx=False, label=False, ax=None, legend=True, ls='-', lw=1):
         """
         Plot the profiles of the species
 
@@ -193,6 +193,8 @@ class model():
             -  legend        :  show legend
             -  ls            :  linestyles
             -  lw            :  linewidth
+            -  logx          :  log of x axis
+            -  label         :  set label of x axis
 
         :return: ax
             -  ax            :  axis object
@@ -200,11 +202,28 @@ class model():
         if species is None:
             species = self.species
 
+
+        if logx:
+            mask = self.av > 0
+            x = np.log10(self.av[mask])
+            xlabel = 'log(Distance), cm'
+        else:
+            mask = self.av > -1
+            x = self.av
+            xlabel = 'Distance, cm'
+
+
         if ax is None:
             fig, ax = plt.subplots()
 
+#        for s in species:
+#            ax.plot(np.log10(self.x[1:]), np.log10(self.sp[s][1:]), '-', label=s, lw=lw)
         for s in species:
-            ax.plot(np.log10(self.x[1:]), np.log10(self.sp[s][1:]), '-', label=s, lw=lw)
+            ax.plot(x[1:], np.log10(self.sp[s][1:]), ls=ls, label=s, lw=lw)
+
+        if label:
+            ax.set_xlim([x[0], x[-1]])
+            ax.set_xlabel(xlabel)
 
         if legend:
             ax.legend()
@@ -273,7 +292,7 @@ class H2_exc():
 
     def readH2database(self):
         import sys
-        sys.path.append('C:/science/python/')
+        sys.path.append('/home/toksovogo/science/codes/python/')
         import H2_summary
 
         self.H2 = H2_summary.load_QSO()
@@ -433,6 +452,28 @@ class H2_exc():
 
         return ax
 
+    def compare_models(self, ax=None, models='current'):
+        """
+        Plot excitation for specified models
+
+        :param:
+            -  ax                :  axes object, where to plot. If None, it will be created
+            -  models            :  names of the models to plot
+
+        :return: ax
+            -  ax                :  axes object
+        """
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(12, 8))
+
+        for ind, m in enumerate(self.listofmodels(models)):
+            m.plot_profiles(ax=ax)
+
+        return ax
+
+
+
+
     def best(self, object='', models='all', syst=0.0):
 
         self.compare(object=object, models=models, syst=syst)
@@ -448,14 +489,16 @@ if __name__ == '__main__':
 
     fig, ax = plt.subplots()
     H2 = H2_exc(folder='data/')
-    #H2.readmodel(filename='test_s_20.hdf5')
+    #H2.readmodel(filename='h2uv_08_s_20.hdf5')
     H2.readfolder()
     #H2.compare(['J0643'])
+    #H2.compare_models(models='all')
     H2.plot_objects(objects='0643', ax=ax)
     name = H2.best(object='0643', syst=0.1)
     print(H2.models[name].uv)
-    if 0:
+    if 1:
         H2.plot_models(ax=ax, models='all')
+        H2.compare_models(models='all')
     else:
         H2.plot_models(ax=ax, models=name)
 
